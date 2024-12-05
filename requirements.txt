@@ -1,0 +1,9 @@
+bs4~=0.0.2
+beautifulsoup4~=4.12.3
+openai~=1.56.2
+selenium~=4.27.1
+tqdm~=4.67.1
+selenium-stealth
+stealth_requests
+yt-dlp[default]
+ttok
