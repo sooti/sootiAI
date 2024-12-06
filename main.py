@@ -90,7 +90,7 @@ def scrape_website(url: str) -> dict[str, str | dict[str, str]]:
             respect_rate_limit(url)
 
             # Fetch and parse response
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, impersonate='safari', verify=False)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -158,13 +158,14 @@ class Agent:
                 - Download files: Respond with {DOWNLOAD} followed by the URL - works for webpages with videos as well.
                 - Scrape python files in a project: Respond with {SCRAPE_PYTHON} followed by the folder path.
                 example: {DOWNLOAD} https://example.com/file.txt
-                - End the session: Respond with {END_SESSION}: if the task is impossible or complete.
+                - End the session: Respond with {END_SESSION} if the task is impossible or complete.
                 - Provide conclusions: Respond with {CONCLUDE} followed by your summary.
             3. Ensure accuracy at each step before proceeding.
             4. Always respond with a single, actionable step, don't add an explanation beyond the action.
             """},
             {"role": "user",
-             "content": f"Task: {task}\n\nPrevious actions taken: {json.dumps(previous_actions)}\n\nWhat should be the next action?"}
+             "content": f"Task: {task}\n\nPrevious actions taken: {json.dumps(previous_actions)}\n\nFor context Today's date is "
+                        f"{datetime.datetime.now()} What should be the next action?"}
         ]
 
         try:
@@ -206,28 +207,25 @@ class Agent:
                 renderer="Intel Iris OpenGL Engine",
                 fix_hairline=True,
                 )
-        try:
-            driver.get('https://www.google.com')
-            search_box = driver.find_element(By.NAME, 'q')
-            search_box.send_keys(query)
-            search_box.send_keys(Keys.RETURN)
-            time.sleep(3)
-            for page in range(3):
-                for result in driver.find_elements(By.CSS_SELECTOR, 'div.g'):
-                    try:
-                        results.append({
-                            'title': result.find_element(By.CSS_SELECTOR, "h3").text,
-                            'link': result.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
-                            'summary': result.find_element(By.CSS_SELECTOR, ".VwiC3b").text
-                        })
-                    except:
-                        pass
-                if page == 0:
-                    driver.find_element(By.CSS_SELECTOR, f'[aria-label="Page {page + 2}"]').click()
-                    time.sleep(2)
-        finally:
-            driver.quit()
-            return results[:10]
+        driver.get('https://www.google.com')
+        search_box = driver.find_element(By.NAME, 'q')
+        search_box.send_keys(query)
+        search_box.send_keys(Keys.RETURN)
+        time.sleep(3)
+        for page in range(2):
+            for result in driver.find_elements(By.CSS_SELECTOR, 'div.g'):
+                try:
+                    results.append({
+                        'title': result.find_element(By.CSS_SELECTOR, "h3").text,
+                        'link': result.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
+                        'summary': result.find_element(By.CSS_SELECTOR, ".VwiC3b").text
+                    })
+                except:
+                    pass
+            if page == 0:
+                driver.find_element(By.CSS_SELECTOR, f'[aria-label="Page {page + 2}"]').click()
+                time.sleep(2)
+        return results[:20]
 
     def _scrape_python_files(self, folder_path):
         """
@@ -384,7 +382,7 @@ class Agent:
                 example: {DOWNLOAD} https://example.com/file.txt
                 - Scrape python files in a project: Respond with {SCRAPE_PYTHON} followed by the folder path.
                 - End the session: Respond with {END_SESSION}: if the task is impossible or complete.
-                - Provide conclusions: Respond with {CONCLUDE} followed by your summary.
+                - When you have reached the end and have a summary ready, respond with {CONCLUDE} followed by the summary.
             3. Ensure accuracy at each step before proceeding.
             4. Always respond with a single, actionable step, don't add an explanation beyond the action.
             Now, based on the task and previous actions, what should be the next action? it must be a single action."""},
@@ -474,23 +472,10 @@ class Agent:
         task_context = self.tasks[task]
         previous_actions = task_context['previous_actions']
         conclusions = task_context['conclusions']
-        max_steps = 10
+        max_steps = 50
         step = 0
 
         print(f"🚀 Starting task: {task}")
-
-        def scrape_url(url):
-            try:
-                url = url.strip()
-                scrape_result = scrape_website(url)
-                if 'error' in scrape_result:
-                    print(f"❌ Page error at: {url} skipping. Error: {scrape_result['error']}")
-                    return None
-                print(f"🕷️ Scraped {url} Successfully")
-                return url, scrape_result
-            except Exception as e:
-                print(f"🕷️ Error scraping {url}: {str(e)}")
-                return None
 
         while step < max_steps:
             step += 1
@@ -501,17 +486,21 @@ class Agent:
 
             if not actions:
                 print(f"🤷‍♂️ No action taken: {full_response}")
+                previous_actions.append(f"the reply: {full_response} is not an action, please reply using one of the "
+                                        f"following actions: {['{SEARCH}', '{DOWNLOAD}', '{SCRAPE}', '{EXECUTE_PYTHON}', '{EXECUTE_BASH}', '{CONCLUDE}', '{END_SESSION}']}")
                 break
 
             for action in actions:
                 if action.startswith("END_SESSION"):
                     print("\n👋 Session ended by agent.")
+                    step = max_steps
                     break
 
                 elif action.startswith("{CONCLUDE}"):
                     conclusion = action[10:].strip()
                     print(f"\n📊 Here's my conclusion:\n{conclusion}")
                     conclusions.append(conclusion)
+                    step = max_steps
                     break
 
                 elif action.startswith("{SCRAPE_PYTHON}"):
@@ -528,20 +517,11 @@ class Agent:
                     previous_actions.append(f"Searched: {search_query}")
                     previous_actions.append(f"Search results: {json.dumps(search_result)}")
                     previous_actions.append(
-                        "\nIf you need more data scrape when of the URLs above from the search results")
+                        "\nYou must select exactly 1 results from the search results to scrape using the {SCRAPE} "
+                        "action."
+                        "select the one that you think will yield the most useful information."
+                        "Only scrape webpages, if you plan on downloading, don't scrape the webpage.")
                     print(f"\n🔍 Search results found: {json.dumps(len(search_result))}")
-
-                    if search_result and 'filetype:' not in search_query \
-                            and '.pdf' not in search_result and 'youtube.com' not in search_result:
-                        with ThreadPoolExecutor(max_workers=20) as executor:
-                            future_to_url = {executor.submit(scrape_url, result['link']): result['link']
-                                             for result in search_result[:5]}
-                            for future in as_completed(future_to_url):
-                                result = future.result()
-                                if result:
-                                    url, scrape_result = result
-                                    previous_actions.append(f"{url} Scraping results: {json.dumps(scrape_result)}")
-                        print("Thinking about the next action based on all this juicy data...🧠🧠🧠")
 
                 elif action.startswith("{DOWNLOAD}"):
                     action = action[10:].strip()
@@ -579,25 +559,17 @@ class Agent:
                     previous_actions.append(f"Result: {result}")
                     print(f"💻 Result: {result}")
 
+                elif action.startswith("{CONCLUDE}"):
+                    conclusion = action[10:].strip()
+                    print(f"\n📊 Here's my conclusion:\n{conclusion}")
+                    conclusions.append(conclusion)
+                    break
+
                 else:
                     previous_actions.append(f"the reply: {action} is not an action, please reply using one of the "
                                             f"following actions: {['{SEARCH}', '{DOWNLOAD}', '{SCRAPE}', '{EXECUTE_PYTHON}', '{EXECUTE_BASH}', '{CONCLUDE}', '{END_SESSION}']}")
                     print(f"🤷‍♂️ No action taken: {action}")
 
-            if self.evaluate_completion(task, previous_actions):
-                print("🎉 Task completed successfully!\nWorking on creating a conclusion...🧠🧠🧠")
-                break
-
-        if not conclusions:
-            conclusion = self.get_conclusion(task, previous_actions)
-            if conclusion:
-                conclusions.append(conclusion)
-                previous_actions.append(f"Added conclusion: {conclusion}")
-
-        if conclusions:
-            print("\n📊 Conclusions:\n")
-            for conclusion in conclusions:
-                print(conclusion)
 
         self.tasks[task] = {'previous_actions': previous_actions, 'conclusions': conclusions}
 
