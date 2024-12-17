@@ -29,7 +29,7 @@ urllib3.disable_warnings()
 base_model = "gpt-4o"
 base_api = "OPEN_API_KEY"  # Use your OpenAI API key
 base_url = "http://localhost:5000/v1"  # Use the base url of your API if you have one
-temperature = 0.2
+temperature = 0.3
 top_p = 0.7
 frequency_penalty = 0
 presence_penalty = 0
@@ -269,6 +269,10 @@ class Agent:
 
         try:
             response = self.client.chat.completions.create(
+                temperature=temperature,
+                top_p=top_p,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
                 model=base_model,
                 messages=messages,
                 max_tokens=max_tokens,
