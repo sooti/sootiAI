@@ -53,6 +53,7 @@ def handle_send_message(data):
                 emit('receive_message', {'status': 'error', 'message': 'Task execution stopped'})
             else:
                 emit('receive_message', {'status': 'completed', 'message': 'Task executed successfully'})
+                agent.task_stopped = False
         except Exception as e:
             # Handle any errors during task execution
             emit('receive_message', {'status': 'error', 'message': str(e)})
