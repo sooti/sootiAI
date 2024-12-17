@@ -1,3 +1,5 @@
+import time
+
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, emit
 from utils.sootiai_web import Agent
@@ -19,31 +21,41 @@ def index():
 def execute_task():
     task = request.json.get('task')
     try:
-        agent.execute_task(task, stop_task_flag)
+        agent.execute_task(task)
         return jsonify({'status': 'success', 'message': 'Task executed successfully'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
 
-@app.route('/clear', methods=['POST'])
+@socketio.on('clear')
 def clear():
     try:
         agent.global_history = []  # Clear global history
+        print(agent.global_history)
         return jsonify({'status': 'success', 'message': 'Tasks cleared successfully'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
 
+@socketio.on('stop_processing')
+def stop_processing():
+    agent.stop_processing = True  # Clear global history
+    emit('receive_message', {'status': 'error', 'message': 'Stopping task... please wait'})
+
+
 
 @socketio.on('send_message')
 def handle_send_message(data):
-    task = data.get('task')
-    try:
-        # Execute the task
-        agent.execute_task(task, stop_task_flag)
-        emit('receive_message', {'status': 'completed', 'message': 'Task executed successfully'})
-    except Exception as e:
-        # Handle any errors during task execution
-        emit('receive_message', {'status': 'error', 'message': str(e)})
+        task = data.get('task')
+        try:
+            # Execute the task
+            agent.execute_task(task)
+            if agent.task_stopped is True:
+                emit('receive_message', {'status': 'error', 'message': 'Task execution stopped'})
+            else:
+                emit('receive_message', {'status': 'completed', 'message': 'Task executed successfully'})
+        except Exception as e:
+            # Handle any errors during task execution
+            emit('receive_message', {'status': 'error', 'message': str(e)})
 
 
 if __name__ == '__main__':
