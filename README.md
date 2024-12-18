@@ -94,6 +94,16 @@ SootiAI bridges these gaps by providing a streamlined, efficient, and flexible s
 4. **Automated Data Collection**
    - "Scrape the latest stock prices for Apple, Google, and Tesla and save them in a CSV file."
 
+## Recommended Local Models
+1. Qwen 14B - I've found this one to be the best balance of speed, script writing and instruction following.
+2. Qwen 7B - Good for some basic research cases and basic tasks, but not complex programming requests.
+3. EXAONE 7.8B - Good for research, OK for programming tasks.
+
+## Bad models in my tests
+1. Llama-3.1
+2. Heremes 2 and Hermes 3
+3. Gemma 9b - mixed results, sometimes ok but other times fails to follow instructions.
+
 ## Roadmap
 
 - Add support for multi-session save/load in the WebUI.
