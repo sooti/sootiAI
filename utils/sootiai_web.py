@@ -7,9 +7,9 @@ import sys
 import time
 from typing import Any, Dict, Set, Generator
 from urllib.parse import urlparse
+import pkg_resources
 
 import colorama
-import pkg_resources
 import requests
 import urllib3
 import yt_dlp
@@ -22,19 +22,25 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium_stealth import stealth
 from tqdm import tqdm
+from dotenv import load_dotenv
+import os
+
 
 colorama.init(autoreset=True)
 urllib3.disable_warnings()
+# Load .env file
+load_dotenv()
 
-base_model = "gpt-4o"
-base_api = "OPEN_API_KEY"  # Use your OpenAI API key
-base_url = "http://localhost:5000/v1"  # Use the base url of your API if you have one
-temperature = 0.3
-top_p = 0.7
-frequency_penalty = 0
-presence_penalty = 0
-max_tokens = 2048  # This value is fine
-max_context = 32000
+# Get values from .env
+base_model = os.getenv("BASE_MODEL")
+base_api = os.getenv("BASE_API")
+base_url = os.getenv("BASE_URL")
+temperature = float(os.getenv("TEMPERATURE", 0.3))
+top_p = float(os.getenv("TOP_P", 1))
+frequency_penalty = float(os.getenv("FREQUENCY_PENALTY", 0))
+presence_penalty = float(os.getenv("PRESENCE_PENALTY", 0))
+max_tokens = int(os.getenv("MAX_TOKENS", 2048))
+max_context = int(os.getenv("MAX_CONTEXT", 32000))
 
 
 def get_installed_packages() -> Set[str]:
@@ -181,7 +187,7 @@ class Agent:
                 using the actions provided in the instructions, imagine you are a robot that can only perform the actions
                 Bad Example:
                 User: whats the weather tomorrow in new york?
-                AI: I will have to perform 10 searches, {CONCLUDE} all done {SCRAPE} http://nework.com 
+                AI: I will have to perform 10 searches,{SCRAPE} http://nework.com {CONCLUDE} all done  
                 {SEARCH} weather in new york.
                 Good Example:
                 User: whats the weather tomorrow in new york?
@@ -209,8 +215,8 @@ class Agent:
                 Always respond with a single, actionable step from the list I provided.
                 """},
                 {"role": "user",
-                 "content": f"Task: {task}\n\nPrevious actions taken: {json.dumps(previous_actions)}\n\nToday's date: "
-                            f"{datetime.datetime.now()} Pleas input next action"}
+                 "content": f"Task: {task}\n\nPrevious actions taken and results: {json.dumps(previous_actions)}\n\nToday's date: "
+                            f"{datetime.datetime.now()} Please input next action, e.g. {task} {['{SEARCH}', '{DOWNLOAD}', '{SCRAPE}', '{EXECUTE_PYTHON}', '{EXECUTE_BASH}', '{CONCLUDE}'][0]}"},
             ]
         else:
             messages = [
@@ -220,7 +226,7 @@ class Agent:
                 using the actions provided in the instructions, imagine you are a robot that can only perform the actions
                 Bad Example:
                 User: whats the weather tomorrow in new york?
-                AI: I will have to perform 10 searches, {CONCLUDE} all done {SCRAPE} http://nework.com 
+                AI: I will have to perform 10 searches, {SCRAPE} http://nework.com {CONCLUDE} all done 
                 {SEARCH} weather in new york.
                 Good Example:
                 User: whats the weather tomorrow in new york?
@@ -245,9 +251,11 @@ class Agent:
                     - Scrape python files in a project: Respond with {SCRAPE_PYTHON} followed by the folder path.
                     example: {DOWNLOAD} https://example.com/file.txt
                     - Provide conclusions: Respond with {CONCLUDE} followed by your summary, do this ONLY if ALL of your
-                    tasks are done and you are ready to provide the summary and end the session, never do it in the same
+                    tasks are done and yo uare on the last step and you are ready to provide the summary and end the
+                     session, never do it in the same
                     step as another action, it should be its own action, never do it in the first step.
-                    If the subject is scientific related then The conclusion should be in a format similar to this if its concluding research or information gathering:
+                    If the subject is scientific related then The conclusion should be in a format similar to this if
+                     its concluding research or information gathering:
                     Abstract – summary of the research objectives, methods, findings, and conclusions.
                     Introduction – Provide background, state the research problem, and outline objectives.
                     Literature Review – Summarize relevant studies and identify gaps.
@@ -307,6 +315,7 @@ class Agent:
 
         except Exception as e:
             print(f"Error occurred: {str(e)}")
+            emit('receive_message', {'status': 'error', 'message': f"Error occurred: {str(e)}"})
             " "
 
     def search_web(self, query):
@@ -682,5 +691,4 @@ def main():
 
 
 if __name__ == "__main__":
-    os.makedirs(DATA_DIR, exist_ok=True)
     main()

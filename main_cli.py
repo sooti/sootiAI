@@ -13,6 +13,7 @@ import pkg_resources
 import requests
 import urllib3
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from openai import OpenAI
 from selenium import webdriver
 from selenium.webdriver import Keys
@@ -24,16 +25,20 @@ import colorama
 
 colorama.init(autoreset=True)
 urllib3.disable_warnings()
+# Load .env file
+load_dotenv()
 
-base_model = "gpt-4o"
-base_api = "OPEN_API_KEY"  # Use your OpenAI API key
-base_url = "http://localhost:5000/v1"  # Use the base url of your API if you have one
-temperature = 0.2
-top_p = 0.7
-frequency_penalty = 0
-presence_penalty = 0
-max_tokens = 2048  # This value is fine
-max_context = 32000
+# Get values from .env
+base_model = os.getenv("BASE_MODEL")
+base_api = os.getenv("BASE_API")
+base_url = os.getenv("BASE_URL")
+temperature = float(os.getenv("TEMPERATURE", 0.3))
+top_p = float(os.getenv("TOP_P", 1))
+frequency_penalty = float(os.getenv("FREQUENCY_PENALTY", 0))
+presence_penalty = float(os.getenv("PRESENCE_PENALTY", 0))
+max_tokens = int(os.getenv("MAX_TOKENS", 2048))
+max_context = int(os.getenv("MAX_CONTEXT", 32000))
+
 
 def get_installed_packages() -> Set[str]:
     return {pkg.key for pkg in pkg_resources.working_set}

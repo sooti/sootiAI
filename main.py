@@ -1,15 +1,22 @@
+import os
 import time
 
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, emit
 from utils.sootiai_web import Agent
+
+# Load .env file
+load_dotenv()
+# Get values from .env
+base_api = os.getenv("BASE_API")
+base_url = os.getenv("BASE_URL")
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
 socketio = SocketIO(app)
 
-agent = Agent(base_url="http://localhost:5000/v1", api_key="OPEN_API_KEY")
-stop_task_flag = False
+agent = Agent(base_url=base_url, api_key=base_api)
 
 
 @app.route('/')
@@ -19,6 +26,8 @@ def index():
 
 @app.route('/execute_task', methods=['POST'])
 def execute_task():
+    agent.task_stopped = False
+    agent.stop_processing = False
     task = request.json.get('task')
     try:
         agent.execute_task(task)
@@ -31,6 +40,8 @@ def execute_task():
 def clear():
     try:
         agent.global_history = []  # Clear global history
+        agent.task_stopped = False
+        agent.stop_processing = False
         print(agent.global_history)
         return jsonify({'status': 'success', 'message': 'Tasks cleared successfully'})
     except Exception as e:
