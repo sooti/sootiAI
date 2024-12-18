@@ -95,8 +95,8 @@ SootiAI bridges these gaps by providing a streamlined, efficient, and flexible s
    - "Scrape the latest stock prices for Apple, Google, and Tesla and save them in a CSV file."
 
 ## Recommended Local Models
-1. Qwen 14B - I've found this one to be the best balance of speed, script writing and instruction following.
-2. Qwen 7B - Good for some basic research cases and basic tasks, but not complex programming requests.
+1. Qwen-2.5 instruct 14B - I've found this one to be the best balance of speed, script writing and instruction following.
+2. Qwen-2.5 instruct 7B - Good for some basic research cases and basic tasks, but not complex programming requests.
 3. EXAONE 7.8B - Good for research, OK for programming tasks.
 
 ## Bad models in my tests
