@@ -8,9 +8,13 @@ SootiAI is a multi-purpose large language model (LLM) agent designed to perform 
    - Search and scrape multiple sources to gather information.
    - Generate summaries or detailed research papers with structured sections like Abstract and Results.
 
+
 2. **Data Handling and Visualization**
    - Gather data online and use it to create data sheets or plot charts using Python.
    - Example: "Plot a graph of the weather in NYC, Chicago, and Houston for the next 3 days."
+   - 
+   ![canada_rocks](https://github.com/user-attachments/assets/956924de-e5f8-408f-920e-15a5b4cb0448)
+   ![Screenshot 2024-12-17 at 14 32 00](https://github.com/user-attachments/assets/6b7e68f5-8a71-46b7-b333-37c1a39c4646)
 
 3. **Local Machine Operations**
    - Execute tasks like creating folders, listing directory contents, or downloading files.
