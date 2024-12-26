@@ -216,11 +216,16 @@ class Agent:
             """
 
         action_definitions = """
-        You must use only one of the following actions based on previous results:
-        1. {THOUGHTS}: Use this to explain reasoning or determine the next step before taking action.
+        You must use only one of the following actions:
+        1. {THOUGHTS}: Use this to determine the next step before taking action.
         2. {SEARCH}: Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
         You must Scrape between 2-6 results depending on task complexity.
-        3. {SCRAPE}: Extract data from a specific URL. Example: {SCRAPE} https://example.com.
+        3. {SCRAPE}: Extract data from a specific URL. Example: {SCRAPE} https://example.com - 
+        Only use {SCRAPE} if one or more of the following conditions are met: 
+            a) You have the URL from search results
+            b) You have the URL from a website you scraped
+            c) The user included the URL in the task description. 
+            In each case or cases you can only use the {SCRAPE} action on the URL provided.
         4. {DOWNLOAD}: Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
         5. {EXECUTE_PYTHON}: Run Python code. Example: {EXECUTE_PYTHON} print(42).
         6. {EXECUTE_BASH}: Run a Bash command. Example: {EXECUTE_BASH} ls -l.
