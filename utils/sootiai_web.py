@@ -551,6 +551,21 @@ class Agent:
 
             actions = self.extract_actions(full_response)
 
+            # Check for invalid {CONCLUDE} combinations
+            conclude_present = any("{CONCLUDE}" in action for action in actions)
+            if conclude_present:
+                invalid_combinations = any(
+                    action not in ("{CONCLUDE}", "{THOUGHTS}") for action in actions if "{CONCLUDE}" in action
+                )
+                if invalid_combinations:
+                    rejection_message = (
+                        "❌ Invalid action combination: {CONCLUDE} must be alone or paired with {THOUGHTS}. "
+                        "Please revise."
+                    )
+                    print(f"{colorama.Fore.RED}{rejection_message}")
+                    emit('receive_message', {'status': 'error', 'message': rejection_message})
+                    continue
+
             for action in actions:
 
                 performed_actions.add(action)
