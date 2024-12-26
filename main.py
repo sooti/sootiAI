@@ -39,7 +39,7 @@ def execute_task():
 @socketio.on('clear')
 def clear():
     try:
-        agent.global_history = []  # Clear global history
+        agent.clear_global_history = True  # Clear global history
         agent.task_stopped = False
         agent.stop_processing = False
         print(agent.global_history)

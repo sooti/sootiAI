@@ -154,6 +154,7 @@ class Agent:
         self.action_log = []
         self.stop_processing = False
         self.task_stopped = False
+        self.clear_global_history = False
         # Initialize client parameters with defaults
         client_params = {
             'base_url': base_url,
@@ -528,6 +529,9 @@ class Agent:
             self.tasks[task] = {'previous_actions': [], 'conclusions': [], 'performed_actions': set()}
 
         task_context = self.tasks[task]
+        if self.clear_global_history:
+            self.global_history = []
+            self.clear_global_history = False
         previous_actions = task_context['previous_actions'] + self.global_history
         conclusions = task_context['conclusions']
         performed_actions = task_context['performed_actions']
@@ -558,7 +562,7 @@ class Agent:
                     break
 
                 elif "{THOUGHTS}" in action:
-                    print(f"\n🤔 Thoughts: {action[10:].strip()}")
+                    print(f"\n🤔 Thoughts: {action[11:].strip()}")
                     emit('receive_message', {'status': 'info', 'message': f"🤔 Thoughts: {action[10:].strip()}"})
                     previous_actions.append(f"Thoughts: {action[11:].strip()}")
 
@@ -572,14 +576,14 @@ class Agent:
                     break
 
                 elif action.startswith("{SCRAPE_PYTHON}"):
-                    python_project_files = action[15:].strip()
+                    python_project_files = action[16:].strip()
                     print(f"{colorama.Fore.CYAN}\nFinished scraping python files in {python_project_files}\n")
                     emit('receive_message',
                          {'status': 'info', 'message': f"Finished scraping python files in {python_project_files}"})
                     previous_actions.append(f"Scraped Python files in {python_project_files}")
 
                 elif action.startswith("{SEARCH}"):
-                    search_query = action[8:].strip().split('\n')[0].replace('"', '')
+                    search_query = action[9:].strip().split('\n')[0].replace('"', '')
                     print(f"{colorama.Fore.CYAN}\n🔍 Searching web for: {search_query}")
                     emit('receive_message', {'status': 'info', 'message': f"🔍 Searching web for: {search_query}"})
                     search_result = self.search_web(search_query)
@@ -646,7 +650,6 @@ class Agent:
 
             self.tasks[task] = {'previous_actions': previous_actions, 'conclusions': conclusions,
                                 'performed_actions': performed_actions}
-            self.global_history.extend(previous_actions)
 
         emit('hide_waiting_animation')
         return len(conclusions) > 0
