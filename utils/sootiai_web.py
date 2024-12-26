@@ -20,6 +20,8 @@ from selenium import webdriver
 from selenium.webdriver import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium_stealth import stealth
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -149,6 +151,7 @@ class Agent:
     def __init__(self, base_url=None, api_key=None):
         self.tasks = {}
         self.global_history = []
+        self.action_log = []
         self.stop_processing = False
         self.task_stopped = False
         # Initialize client parameters with defaults
@@ -178,102 +181,84 @@ class Agent:
         self.tasks = {}
         self.global_history = []
 
-    def stream_response(self, task: str, previous_actions: list) -> Generator[str, None, None]:
-        if previous_actions is None:
-            messages = [
-                {"role": "system", "content": """
-                You are an AI assistant designed to help with various tasks, You will be given a task to solve,
-                and you will need to follow the instructions provided to solve it, you never say anything other then
-                using the actions provided in the instructions, imagine you are a robot that can only perform the actions
-                Bad Example:
-                User: whats the weather tomorrow in new york?
-                AI: I will have to perform 10 searches,{SCRAPE} http://nework.com {CONCLUDE} all done  
-                {SEARCH} weather in new york.
-                Good Example:
-                User: whats the weather tomorrow in new york?
-                AI: {SEARCH} weather in new york.
-                The following are the actions you can perform:
-                    - Thoughts - Response with {THOUGHTS} - these are intermediate steps that you double check before 
-                    performing an action, use a tree model to decide which action is best and only on the next step perform 
-                    the action, do not perform it in the same reply!.
-                    - Web search: Respond with {SEARCH} followed by your query, try to create a logical search query 
-                    that will yield the most effective results, don't use long queries, if you need to look for multiple
-                    items, example, nvidia stock, intel stock, just do one search at a time for each,
-                    Once you have the search results, you MUST select between 3-8 results to scrape.
-                    , never do more than 8.
-                    - File web search: Respond with {SEARCH} followed by the file type and a colon and the query
-                    example of a websearch of files: filetype:pdf "jane eyre".
-                    - Execute Python code: Respond with {EXECUTE_PYTHON} followed by the code, never use anything with APIs 
-                    that require signup.
-                    - Execute Bash commands: Respond with {EXECUTE_BASH} followed by the commands.
-                    - Scrape a website: Respond with {SCRAPE} followed by the URL.
-                    - Download files: Respond with {DOWNLOAD} followed by the URL - works for webpages with videos as well.
-                    only download files, never webpages.
-                    - Scrape python files in a project: Respond with {SCRAPE_PYTHON} followed by the folder path.
-                    example: {DOWNLOAD} https://example.com/file.txt
-                Ensure accuracy at each step before proceeding, use {THOUGHTS} and try to decide what to do next.
-                Always respond with a single, actionable step from the list I provided.
-                """},
-                {"role": "user",
-                 "content": f"Task: {task}\n\nPrevious actions taken and results: {json.dumps(previous_actions)}\n\nToday's date: "
-                            f"{datetime.datetime.now()} Please input next action, e.g. {task} {['{SEARCH}', '{DOWNLOAD}', '{SCRAPE}', '{EXECUTE_PYTHON}', '{EXECUTE_BASH}', '{CONCLUDE}'][0]}"},
-            ]
+    def validate_response(self, response: str) -> bool:
+        """
+        Validates the model's response to ensure adherence to the single-action rule.
+        """
+        # Regex for all valid actions
+        allowed_actions = [
+            r"^\{THOUGHTS\}$",
+            r"^\{SEARCH [^\}]+\}$",
+            r"^\{SCRAPE [^\}]+\}$",
+            r"^\{DOWNLOAD [^\}]+\}$",
+            r"^\{EXECUTE_PYTHON [^\}]+\}$",
+            r"^\{EXECUTE_BASH [^\}]+\}$",
+            r"^\{CONCLUDE [^\}]+\}$"
+        ]
+        # Match response against valid actions
+        action_matches = [re.match(pattern, response.strip()) for pattern in allowed_actions]
+        return sum(1 for match in action_matches if match) == 1
+
+    def generate_prompt(self, task: str, previous_actions: list) -> str:
+        """
+        Generates a dynamic prompt based on the task and previous actions.
+        """
+        complexity = "complex" if len(previous_actions) > 5 else "simple"
+
+        if complexity == "complex":
+            instructions = """
+            For complex tasks, ensure intermediate results are validated before proceeding.
+            Use structured approaches and avoid assumptions.
+            """
         else:
-            messages = [
-                {"role": "system", "content": """Solve the following task efficiently and clearly:
-                You are an AI assistant designed to help with various tasks, You will be given a task to solve,
-                and you will need to follow the instructions provided to solve it, you never say anything other then
-                using the actions provided in the instructions, imagine you are a robot that can only perform the actions
-                Bad Example:
-                User: whats the weather tomorrow in new york?
-                AI: I will have to perform 10 searches, {SCRAPE} http://nework.com {CONCLUDE} all done 
-                {SEARCH} weather in new york.
-                Good Example:
-                User: whats the weather tomorrow in new york?
-                AI: {SEARCH} weather in new york.
-                The following are the actions you can perform:
-                    - Thoughts - Response with {THOUGHTS} - these are intermediate steps that you double check before 
-                    performing an action, use a tree model to decide which action is best and only on the next step perform 
-                    the action, do not perform it in the same reply!.
-                    - Web search: Respond with {SEARCH} followed by your query, try to create a logical search query 
-                    that will yield the most effective results, don't use long queries, if you need to look for multiple
-                    items, example, nvidia stock, intel stock, just do one search at a time for each.
-                    Once you have the search results, you MUST select between 3-8 results to scrape.
-                    , never do more than 8.
-                    - File web search: Respond with {SEARCH} followed by the file type and a colon and the query
-                    example of a websearch of files: filetype:pdf "jane eyre".
-                    - Execute Python code: Respond with {EXECUTE_PYTHON} followed by the code, never use anything with APIs 
-                    that require signup.
-                    - Execute Bash commands: Respond with {EXECUTE_BASH} followed by the commands.
-                    - Scrape a website: Respond with {SCRAPE} followed by the URL.
-                    - Download files: Respond with {DOWNLOAD} followed by the URL - works for webpages with videos as well.
-                    only download files, never webpages.
-                    - Scrape python files in a project: Respond with {SCRAPE_PYTHON} followed by the folder path.
-                    example: {DOWNLOAD} https://example.com/file.txt
-                    - Provide conclusions: Respond with {CONCLUDE} followed by your summary, do this ONLY if ALL of your
-                    tasks are done and yo uare on the last step and you are ready to provide the summary and end the
-                     session, never do it in the same
-                    step as another action, it should be its own action, never do it in the first step.
-                    If the subject is scientific related then The conclusion should be in a format similar to this if
-                     its concluding research or information gathering:
-                    Abstract – summary of the research objectives, methods, findings, and conclusions.
-                    Introduction – Provide background, state the research problem, and outline objectives.
-                    Literature Review – Summarize relevant studies and identify gaps.
-                    Methodology – Describe the research design, sample size, and methods.
-                    Results – Present findings (include tables/graphs if necessary).
-                    Discussion – Interpret results, compare with existing studies, and discuss limitations.
-                    Conclusion – Summarize findings and suggest future research.
-                    References – List citations used.
-                    Otherwise if its none scientific, such as a simple question on weather tomorrow, just do a detailed 
-                    summary.
-                
-                Always respond with a single, Always respond with a single, actionable step from the list I
-                 provided, don't add an explanation beyond the action unless its the conclusion.
-                """},
-                {"role": "user",
-                 "content": f"Task: {task}\n\nPrevious actions taken: {json.dumps(previous_actions)}\n\nFor context Today's date is "
-                            f"{datetime.datetime.now()} What should be the next action?"}
-            ]
+            instructions = """
+            For simple tasks, provide precise and concise responses to quickly achieve the goal.
+            """
+
+        action_definitions = """
+        You must use only one of the following actions based on previous results:
+        1. {THOUGHTS}: Use this to explain reasoning or determine the next step before taking action.
+        2. {SEARCH}: Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
+        You must Scrape between 2-6 results depending on task complexity.
+        3. {SCRAPE}: Extract data from a specific URL. Example: {SCRAPE} https://example.com.
+        4. {DOWNLOAD}: Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
+        5. {EXECUTE_PYTHON}: Run Python code. Example: {EXECUTE_PYTHON} print(42).
+        6. {EXECUTE_BASH}: Run a Bash command. Example: {EXECUTE_BASH} ls -l.
+        7. {CONCLUDE}: Provide a detailed summary once all tasks are completed. This should be used **only after all 
+        actions have been executed** and the task is ready to conclude, 
+        For research or scientific tasks, structure your conclusion as follows:
+            {CONCLUDE}:
+            - Abstract – summary of the research objectives, methods, findings, and conclusions.
+            - Introduction – Provide background, state the research problem, and outline objectives.
+            - Literature Review – Summarize relevant studies and identify gaps.
+            - Methodology – Describe the research design, sample size, and methods.
+            - Results – Present findings (include tables/graphs if necessary).
+            - Discussion – Interpret results, compare with existing studies, and discuss limitations.
+            - Conclusion – Summarize findings and suggest future research.
+            - References – List citations used.
+        For all other cases just provide the summary like this: {CONCLUDE}: followed by the summary of the task.
+        """
+
+        return f"""
+        You are an AI assistant. Follow the rules:
+        {action_definitions}
+        {instructions}
+
+        Task: {task}
+        Previous Actions: {json.dumps(previous_actions or [])}
+        Action Log: {json.dumps(self.action_log)}
+        Today's Date: {datetime.datetime.now().isoformat()}
+
+        Remember: Do not use CONCLUDE until all necessary actions have been performed.
+        """
+
+    def stream_response(self, task: str, previous_actions: list) -> Generator[str, None, None]:
+        """
+        Streams the response from the AI, ensuring it follows the single-action rule and
+        dynamically adapts to task complexity.
+        """
+        prompt = self.generate_prompt(task, previous_actions)
+        messages = [{"role": "system", "content": prompt}]
 
         try:
             response = self.client.chat.completions.create(
@@ -284,17 +269,15 @@ class Agent:
                 model=base_model,
                 messages=messages,
                 max_tokens=max_tokens,
-                stream=True
+                stream=True,
             )
-            full_response = ""
 
-            # Create an iterator from the response
+            full_response = ""
             response_iterator = response.__iter__()
 
             while True:
                 if self.stop_processing:
                     print("Stopping task processing...")
-                    # Close the connection
                     response.close()
                     self.task_stopped = True
                     break
@@ -312,11 +295,16 @@ class Agent:
 
             if task in self.tasks:
                 self.tasks[task]['streamed_response'] = full_response
+                # Log the response for tracking
+                self.action_log.append({"action": task, "result": full_response})
 
         except Exception as e:
-            print(f"Error occurred: {str(e)}")
-            emit('receive_message', {'status': 'error', 'message': f"Error occurred: {str(e)}"})
-            " "
+            error_type = type(e).__name__
+            print(f"Error occurred: {error_type} - {str(e)}")
+            emit('receive_message', {
+                'status': 'error',
+                'message': f"{error_type}: {str(e)}. Try rephrasing the task or checking input data."
+            })
 
     def search_web(self, query):
         results = []
@@ -334,11 +322,19 @@ class Agent:
                 fix_hairline=True,
                 )
         driver.get('https://www.google.com')
-        search_box = driver.find_element(By.NAME, 'q')
+
+        # Wait for the search box to be visible
+        search_box = WebDriverWait(driver, 10).until(
+            EC.visibility_of_element_located((By.NAME, 'q'))
+        )
         search_box.send_keys(query)
         search_box.send_keys(Keys.RETURN)
         for page in range(2):
-            time.sleep(2)
+            # Wait for the search results to load
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'div.g'))
+            )
+
             for result in driver.find_elements(By.CSS_SELECTOR, 'div.g'):
                 try:
                     results.append({
@@ -346,16 +342,21 @@ class Agent:
                         'link': result.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
                         'summary': result.find_element(By.CSS_SELECTOR, ".VwiC3b").text
                     })
-                except:
+                except Exception:
                     pass
+
             if page == 0:
                 try:
-                    driver.find_element(By.CSS_SELECTOR, f'[aria-label="Page {page + 2}"]').click()
+                    # Wait for the next page button to be clickable
+                    next_page_button = WebDriverWait(driver, 10).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, f'[aria-label="Page {page + 2}"]'))
+                    )
+                    next_page_button.click()
                 except Exception:
                     continue
                 time.sleep(3)
 
-        return results[:int(max_context / 500)]
+        return results
 
     def _scrape_python_files(self, path):
         """
@@ -518,13 +519,13 @@ class Agent:
         return actions
 
     def execute_task(self, task):
-
         if task not in self.tasks:
-            self.tasks[task] = {'previous_actions': [], 'conclusions': []}
+            self.tasks[task] = {'previous_actions': [], 'conclusions': [], 'performed_actions': set()}
 
         task_context = self.tasks[task]
         previous_actions = task_context['previous_actions'] + self.global_history
         conclusions = task_context['conclusions']
+        performed_actions = task_context['performed_actions']
         max_steps = 20
         step = 0
 
@@ -534,7 +535,6 @@ class Agent:
 
         while step < max_steps and not self.task_stopped:
             step += 1
-            # Check the stop_task_flag at the beginning of each iteration
 
             full_response = ""
             for chunk in self.stream_response(task, previous_actions):
@@ -542,12 +542,10 @@ class Agent:
 
             actions = self.extract_actions(full_response)
 
-            if not actions and not self.stop_processing:
-                print(f"{colorama.Fore.YELLOW}🤷‍♂️ No action taken: {full_response}\n")
-                previous_actions.append(f"the reply: {full_response} is not an action, you MUST reply using one of the "
-                                        f"following actions: {['{SEARCH}', '{DOWNLOAD}', '{SCRAPE}', '{EXECUTE_PYTHON}', '{EXECUTE_BASH}', '{CONCLUDE}', '{END_SESSION}']}")
-
             for action in actions:
+
+                performed_actions.add(action)
+
                 if "{END_SESSION}" in action:
                     print("\n👋 Session ended by agent.")
                     emit('receive_message', {'status': 'info', 'message': "👋 Session ended by agent."})
@@ -560,7 +558,7 @@ class Agent:
                     previous_actions.append(f"Thoughts: {action[11:].strip()}")
 
                 elif "{CONCLUDE}" in action:
-                    conclusion = action[10:].strip()
+                    conclusion = action[11:].strip()
                     print(f"\n📊 Here's my conclusion:\n{conclusion}")
                     emit('receive_message', {'status': 'info', 'message': f"📊 Here's my conclusion:"})
                     emit('receive_message', {'status': 'info', 'message': conclusion})
@@ -576,16 +574,12 @@ class Agent:
                     previous_actions.append(f"Scraped Python files in {python_project_files}")
 
                 elif action.startswith("{SEARCH}"):
-                    try:
-                        search_query = action[8:].strip().split('\n')[0]
-                    except AttributeError:
-                        search_query = action[8:].strip()
-                    search_query = search_query.replace('"', '')
+                    search_query = action[8:].strip().split('\n')[0].replace('"', '')
                     print(f"{colorama.Fore.CYAN}\n🔍 Searching web for: {search_query}")
                     emit('receive_message', {'status': 'info', 'message': f"🔍 Searching web for: {search_query}"})
                     search_result = self.search_web(search_query)
                     previous_actions.append(f"Searched: {search_query}")
-                    previous_actions.append(f"Search results: {json.dumps(search_result)}\n Select between 3-8 results"
+                    previous_actions.append(f"Search results: {json.dumps(search_result)}\n Select between 2-4 results"
                                             f" to scrape or download")
                     print(f"{colorama.Fore.CYAN}\n🔍 Search results found: {json.dumps(len(search_result))}")
                     emit('receive_message',
@@ -645,12 +639,8 @@ class Agent:
                     print(f"{colorama.Fore.CYAN}💻 Result: {result}")
                     emit('receive_message', {'status': 'info', 'message': f"💻 Result: {result}"})
 
-                else:
-                    previous_actions.append(f"the reply: {action} is not an action, please reply using one of the "
-                                            f"following actions: {['{SEARCH}', '{DOWNLOAD}', '{SCRAPE}', '{EXECUTE_PYTHON}', '{EXECUTE_BASH}', '{CONCLUDE}', '{END_SESSION}']}")
-                    print(f"{colorama.Fore.YELLOW}🤷‍♂️ No action taken: {action}")
-
-            self.tasks[task] = {'previous_actions': previous_actions, 'conclusions': conclusions}
+            self.tasks[task] = {'previous_actions': previous_actions, 'conclusions': conclusions,
+                                'performed_actions': performed_actions}
             self.global_history.extend(previous_actions)
 
         emit('hide_waiting_animation')
