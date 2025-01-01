@@ -602,9 +602,14 @@ class Agent:
                     print(f"{colorama.Fore.CYAN}\n🔍 Searching web for: {search_query}")
                     emit('receive_message', {'status': 'info', 'message': f"🔍 Searching web for: {search_query}"})
                     search_result = self.search_web(search_query)
-                    previous_actions.append(f"Searched: {search_query}")
-                    previous_actions.append(f"Search results: {json.dumps(search_result)}\n Select between 2-4 results"
-                                            f" to scrape or download")
+                    if json.dumps(search_result) in previous_actions:
+                        print(f"{colorama.Fore.RED}\n🔍 Search results already provided: {search_query}")
+                        emit('receive_message',
+                             {'status': 'info', 'message': f"🔍 Search results already provided: {search_query}"})
+                    else:
+                        previous_actions.append(f"Searched: {search_query}")
+                        previous_actions.append(f"Search results: {json.dumps(search_result)}\n Select between 2-4 results"
+                                                f" to scrape or download")
                     print(f"{colorama.Fore.CYAN}\n🔍 Search results found: {json.dumps(len(search_result))}")
                     emit('receive_message',
                          {'status': 'info', 'message': f"🔍 Search results found: {json.dumps(len(search_result))}"})
@@ -635,9 +640,14 @@ class Agent:
                         print(f"{colorama.Fore.CYAN}\n🕷️ Scraping website: {url}")
                         emit('receive_message', {'status': 'info', 'message': f"🕷️ Scraping website: {url}"})
                         result = scrape_website(url)
-                        previous_actions.append(f"Scraped {url}")
-                        previous_actions.append(f"Scraping results: {json.dumps(result)} is this the information you "
-                                                f"were looking for?")
+                        if json.dumps(result) in previous_actions:
+                            print(f"{colorama.Fore.RED}🕷️ Scraping results already provided: {url}")
+                            emit('receive_message',
+                                 {'status': 'info', 'message': f"🕷️ Scraping results already provided: {url}"})
+                        else:
+                            previous_actions.append(f"Scraped {url}")
+                            previous_actions.append(f"Scraping results: {json.dumps(result)} is this the information you "
+                                                    f"were looking for?")
                     except Exception as e:
                         previous_actions.append(f"Scraping error: {str(e)}")
                         print(f"{colorama.Fore.RED}🕷️ Scraping error: {str(e)}")
