@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import pkg_resources
 
 import colorama
-import requests
+import stealth_requests as requests
 import urllib3
 import yt_dlp
 from bs4 import BeautifulSoup
@@ -114,7 +114,7 @@ def scrape_website(url: str) -> dict[str, dict[str, Any] | str] | str:
         respect_rate_limit(url)
 
         # Fetch and parse response
-        response = requests.get(url, verify=False, headers=HEADERS)
+        response = requests.get(url, verify=False, headers=HEADERS, impersonate='safari')
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -151,7 +151,6 @@ class Agent:
     def __init__(self, base_url=None, api_key=None):
         self.tasks = {}
         self.global_history = []
-        self.action_log = []
         self.stop_processing = False
         self.task_stopped = False
         self.clear_global_history = False
@@ -182,24 +181,6 @@ class Agent:
         self.tasks = {}
         self.global_history = []
 
-    def validate_response(self, response: str) -> bool:
-        """
-        Validates the model's response to ensure adherence to the single-action rule.
-        """
-        # Regex for all valid actions
-        allowed_actions = [
-            r"^\{THOUGHTS\}$",
-            r"^\{SEARCH [^\}]+\}$",
-            r"^\{SCRAPE [^\}]+\}$",
-            r"^\{DOWNLOAD [^\}]+\}$",
-            r"^\{EXECUTE_PYTHON [^\}]+\}$",
-            r"^\{EXECUTE_BASH [^\}]+\}$",
-            r"^\{CONCLUDE [^\}]+\}$"
-        ]
-        # Match response against valid actions
-        action_matches = [re.match(pattern, response.strip()) for pattern in allowed_actions]
-        return sum(1 for match in action_matches if match) == 1
-
     def generate_prompt(self, task: str, previous_actions: list) -> str:
         """
         Generates a dynamic prompt based on the task and previous actions.
@@ -217,23 +198,25 @@ class Agent:
             """
 
         action_definitions = """
-        You must use only one of the following actions:
-        1. {THOUGHTS}: Use this to determine the next step before taking action.
-        2. {SEARCH}: Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
+        You are an AI with tools and actions.
+        HE FORMAT FOR ACTIONS IS {ACTION} ARGUMENTS
+        The following are the actions that fit the above format:
+        1. {SEARCH} [QUERY] - Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
         You must Scrape between 2-6 results depending on task complexity.
-        3. {SCRAPE}: Extract data from a specific URL. Example: {SCRAPE} https://example.com - 
+        2. {SCRAPE} [URL] - 
         Only use {SCRAPE} if one or more of the following conditions are met: 
             a) You have the URL from search results
             b) You have the URL from a website you scraped
             c) The user included the URL in the task description. 
             In each case or cases you can only use the {SCRAPE} action on the URL provided.
-        4. {DOWNLOAD}: Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
-        5. {EXECUTE_PYTHON}: Run Python code. Example: {EXECUTE_PYTHON} print(42).
-        6. {EXECUTE_BASH}: Run a Bash command. Example: {EXECUTE_BASH} ls -l.
-        7. {CONCLUDE}: Provide a detailed summary once all tasks are completed. This should be used **only after all 
+        if you get a scrape error, Try to scrape another URL if you have one or search for a new URL.
+        3. {DOWNLOAD} [URL] - Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
+        4. {EXECUTE_PYTHON} [CODE] -  Run Python code. Example: {EXECUTE_PYTHON} print(42).
+        5. {EXECUTE_BASH} [CODE] - Run a Bash command. Example: {EXECUTE_BASH} ls -l.
+        6. {CONCLUDE} [CONCLUSION] - Provide a detailed summary once all tasks are completed. This should be used **only after all 
         actions have been executed** and the task is ready to conclude, 
         For research or scientific tasks, structure your conclusion as follows:
-            {CONCLUDE}:
+            {CONCLUDE}
             - Abstract – summary of the research objectives, methods, findings, and conclusions.
             - Introduction – Provide background, state the research problem, and outline objectives.
             - Literature Review – Summarize relevant studies and identify gaps.
@@ -243,6 +226,8 @@ class Agent:
             - Conclusion – Summarize findings and suggest future research.
             - References – List citations used.
         For all other cases just provide the summary like this: {CONCLUDE}: followed by the summary of the task.
+
+        NEVER DO MORE THEN ONE ACTION IN A RESPONSE, NEVER DESCRIBE WHAT YOU ARE DOING, JUST DO
         """
 
         return f"""
@@ -252,11 +237,34 @@ class Agent:
 
         Task: {task}
         Previous Actions: {json.dumps(previous_actions or [])}
-        Action Log: {json.dumps(self.action_log)}
         Today's Date: {datetime.datetime.now().isoformat()}
 
         Remember: Do not use CONCLUDE until all necessary actions have been performed.
         """
+
+    def get_conclusion(self, task, actions):
+        messages = [
+            {"role": "system", "content": "You are an AI agent that provides conclusions based on task completion."},
+            {"role": "user",
+             "content": f"Task: {task}\n\nActions taken: {json.dumps(actions)}\n\nProvide a conclusion for the task."}
+        ]
+        for attempt in range(self.max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=base_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    max_completion_tokens=max_context,
+                    top_p=top_p,
+                    frequency_penalty=frequency_penalty,
+                    presence_penalty=presence_penalty
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    raise e
+                time.sleep(self.retry_delay * (attempt + 1))
 
     def stream_response(self, task: str, previous_actions: list) -> Generator[str, None, None]:
         """
@@ -275,6 +283,7 @@ class Agent:
                 model=base_model,
                 messages=messages,
                 max_tokens=max_tokens,
+                max_completion_tokens=max_context,
                 stream=True,
             )
 
@@ -301,8 +310,6 @@ class Agent:
 
             if task in self.tasks:
                 self.tasks[task]['streamed_response'] = full_response
-                # Log the response for tracking
-                self.action_log.append({"action": task, "result": full_response})
 
         except Exception as e:
             error_type = type(e).__name__
@@ -312,55 +319,68 @@ class Agent:
                 'message': f"{error_type}: {str(e)}. Try rephrasing the task or checking input data."
             })
 
+    def evaluate_completion(self, task, actions):
+        if len(actions) > 2:
+            messages = [
+                {"role": "system", "content": "You are an AI agent that evaluates task completion."},
+                {"role": "user",
+                 "content": f"Task: {task}\n\nActions taken: {json.dumps(actions)}\n\nHas the task been completed? Respond with 'YES' if completed, 'NO' if not."}
+            ]
+            for attempt in range(self.max_retries):
+                try:
+                    response = self.client.chat.completions.create(
+                        model=base_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        max_completion_tokens=max_context,
+                        top_p=top_p,
+                        frequency_penalty=frequency_penalty,
+                        presence_penalty=presence_penalty
+                    )
+                    return "YES" in response.choices[0].message.content.upper()
+                except Exception as e:
+                    if attempt == self.max_retries - 1:
+                        raise e
+                    time.sleep(self.retry_delay * (attempt + 1))
+            else:
+                return
+
     def search_web(self, query):
         results = []
-        options = Options()
-        options.add_argument("--headless")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        driver = webdriver.Chrome(options=options)
-        stealth(driver,
-                languages=["en-US", "en"],
-                vendor="Google Inc.",
-                platform="Win32",
-                webgl_vendor="Intel Inc.",
-                renderer="Intel Iris OpenGL Engine",
-                fix_hairline=True,
-                )
-        driver.get('https://www.google.com')
+        seen_links = set()  # Track unique links to avoid duplicates
 
-        # Wait for the search box to be visible
-        search_box = WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located((By.NAME, 'q'))
-        )
-        search_box.send_keys(query)
-        search_box.send_keys(Keys.RETURN)
-        for page in range(2):
-            # Wait for the search results to load
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'div.g'))
-            )
+        # Base Google Search URL
+        base_url = "https://www.google.com/search"
+        params = {"q": query, "hl": "en"}  # Parameters for Google search query
 
-            for result in driver.find_elements(By.CSS_SELECTOR, 'div.g'):
+        for page in range(2):  # Iterate through the first five pages
+            params["start"] = page * 10  # Pagination parameter
+            response = requests.get(base_url, params=params)
+            if response.status_code != 200:
+                print(f"Failed to fetch search results: {response.status_code}")
+                break
+
+            # Parse HTML content
+            soup = BeautifulSoup(response.text, "html.parser")
+            search_results = soup.select("div")
+
+            for result in search_results:
                 try:
-                    results.append({
-                        'title': result.find_element(By.CSS_SELECTOR, "h3").text,
-                        'link': result.find_element(By.CSS_SELECTOR, "a").get_attribute("href"),
-                        'summary': result.find_element(By.CSS_SELECTOR, ".VwiC3b").text
-                    })
-                except Exception:
-                    pass
+                    title_element = result.select_one("h3")
+                    link_element = result.select_one("a")
 
-            if page == 0:
-                try:
-                    # Wait for the next page button to be clickable
-                    next_page_button = WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.CSS_SELECTOR, f'[aria-label="Page {page + 2}"]'))
-                    )
-                    next_page_button.click()
-                except Exception:
+                    if title_element is not None and link_element is not None:
+                        link = link_element["href"].replace('/url?q=', '')
+                        if link not in seen_links:  # Check if the link is already seen
+                            seen_links.add(link)  # Mark this link as seen
+                            results.append({
+                                "title": title_element.get_text(strip=True),
+                                "link": link,
+                            })
+                except Exception as e:
+                    print(f"Error parsing result: {e}")
                     continue
-                time.sleep(3)
 
         return results
 
@@ -551,21 +571,6 @@ class Agent:
 
             actions = self.extract_actions(full_response)
 
-            # Check for invalid {CONCLUDE} combinations
-            conclude_present = any("{CONCLUDE}" in action for action in actions)
-            if conclude_present:
-                invalid_combinations = any(
-                    action not in ("{CONCLUDE}", "{THOUGHTS}") for action in actions if "{CONCLUDE}" in action
-                )
-                if invalid_combinations:
-                    rejection_message = (
-                        "❌ Invalid action combination: {CONCLUDE} must be alone or paired with {THOUGHTS}. "
-                        "Please revise."
-                    )
-                    print(f"{colorama.Fore.RED}{rejection_message}")
-                    emit('receive_message', {'status': 'error', 'message': rejection_message})
-                    continue
-
             for action in actions:
 
                 performed_actions.add(action)
@@ -575,11 +580,6 @@ class Agent:
                     emit('receive_message', {'status': 'info', 'message': "👋 Session ended by agent."})
                     step = max_steps
                     break
-
-                elif "{THOUGHTS}" in action:
-                    print(f"\n🤔 Thoughts: {action[11:].strip()}")
-                    emit('receive_message', {'status': 'info', 'message': f"🤔 Thoughts: {action[10:].strip()}"})
-                    previous_actions.append(f"Thoughts: {action[11:].strip()}")
 
                 elif "{CONCLUDE}" in action:
                     conclusion = action[11:].strip()
@@ -598,7 +598,7 @@ class Agent:
                     previous_actions.append(f"Scraped Python files in {python_project_files}")
 
                 elif action.startswith("{SEARCH}"):
-                    search_query = action[9:].strip().split('\n')[0].replace('"', '')
+                    search_query = action[8:].strip().split('\n')[0].replace('"', '')
                     print(f"{colorama.Fore.CYAN}\n🔍 Searching web for: {search_query}")
                     emit('receive_message', {'status': 'info', 'message': f"🔍 Searching web for: {search_query}"})
                     search_result = self.search_web(search_query)
@@ -666,8 +666,27 @@ class Agent:
             self.tasks[task] = {'previous_actions': previous_actions, 'conclusions': conclusions,
                                 'performed_actions': performed_actions}
 
+            if self.evaluate_completion(task, previous_actions):
+                print("🎉 Task completed successfully!\nWorking on creating a conclusion...🧠🧠🧠")
+                emit('receive_message', {'status': 'info', 'message': "🎉 Task completed successfully!"})
+                emit('receive_message', {'status': 'info', 'message': "Working on creating a conclusion...🧠🧠🧠"})
+                break
+
+        if not conclusions:
+            conclusion = self.get_conclusion(task, previous_actions)
+            if conclusion:
+                conclusions.append(conclusion)
+                previous_actions.append(f"Added conclusion: {conclusion}")
+
+        if conclusions:
+            print("\n📊 Conclusions:\n")
+            for conclusion in conclusions:
+                print(conclusion)
+                emit('receive_message', {'status': 'info', 'message': conclusion})
+
         emit('hide_waiting_animation')
         return len(conclusions) > 0
+
 
 
 def main():

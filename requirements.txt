@@ -4,7 +4,6 @@ openai~=1.56.2
 flask
 selenium~=4.27.1
 tqdm~=4.67.1
-selenium-stealth
 stealth_requests
 yt-dlp[default]
 ttok
@@ -12,3 +11,5 @@ flask-socketio
 urllib3
 colorama
 python-dotenv
+setuptools
+tls-client
