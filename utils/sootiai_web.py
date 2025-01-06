@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 from typing import Any, Dict, Set, Generator
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 import pkg_resources
 
 import colorama
@@ -176,11 +176,6 @@ class Agent:
         self.max_retries = 3
         self.retry_delay = 1
 
-        # Additional properties
-        self.current_request = None
-        self.tasks = {}
-        self.global_history = []
-
     def generate_prompt(self, task: str, previous_actions: list) -> str:
         """
         Generates a dynamic prompt based on the task and previous actions.
@@ -201,19 +196,18 @@ class Agent:
         You are an AI with tools and actions.
         HE FORMAT FOR ACTIONS IS {ACTION} ARGUMENTS
         The following are the actions that fit the above format:
-        1. {SEARCH} [QUERY] - Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
+        1. {SEARCH} QUERY - Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
         You must Scrape between 2-6 results depending on task complexity.
-        2. {SCRAPE} [URL] - 
+        2. {SCRAPE} URL - 
         Only use {SCRAPE} if one or more of the following conditions are met: 
             a) You have the URL from search results
             b) You have the URL from a website you scraped
             c) The user included the URL in the task description. 
             In each case or cases you can only use the {SCRAPE} action on the URL provided.
-        if you get a scrape error, Try to scrape another URL if you have one or search for a new URL.
-        3. {DOWNLOAD} [URL] - Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
-        4. {EXECUTE_PYTHON} [CODE] -  Run Python code. Example: {EXECUTE_PYTHON} print(42).
-        5. {EXECUTE_BASH} [CODE] - Run a Bash command. Example: {EXECUTE_BASH} ls -l.
-        6. {CONCLUDE} [CONCLUSION] - Provide a detailed summary once all tasks are completed. This should be used **only after all 
+        3. {DOWNLOAD} URL - Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
+        4. {EXECUTE_PYTHON} CODE -  Run Python code. Example: {EXECUTE_PYTHON} print(42).
+        5. {EXECUTE_BASH} CODE - Run a Bash command. Example: {EXECUTE_BASH} ls -l.
+        6. {CONCLUDE} CONCLUSION - Provide a detailed summary once all tasks are completed. This should be used **only after all 
         actions have been executed** and the task is ready to conclude, 
         For research or scientific tasks, structure your conclusion as follows:
             {CONCLUDE}
@@ -227,7 +221,7 @@ class Agent:
             - References – List citations used.
         For all other cases just provide the summary like this: {CONCLUDE}: followed by the summary of the task.
 
-        NEVER DO MORE THEN ONE ACTION IN A RESPONSE, NEVER DESCRIBE WHAT YOU ARE DOING, JUST DO
+        NEVER DO MORE THEN ONE ACTION IN A RESPONSE, NEVER DESCRIBE WHAT YOU ARE DOING, DO NOT BE CHATTY, JUST DO
         """
 
         return f"""
@@ -254,8 +248,8 @@ class Agent:
                     model=base_model,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens,
-                    max_completion_tokens=max_context,
+                    max_tokens=max_context,
+                    # max_completion_tokens=max_context,
                     top_p=top_p,
                     frequency_penalty=frequency_penalty,
                     presence_penalty=presence_penalty
@@ -332,8 +326,8 @@ class Agent:
                         model=base_model,
                         messages=messages,
                         temperature=temperature,
-                        max_tokens=max_tokens,
-                        max_completion_tokens=max_context,
+                        max_tokens=max_context,
+                        # max_completion_tokens=max_context,
                         top_p=top_p,
                         frequency_penalty=frequency_penalty,
                         presence_penalty=presence_penalty
@@ -371,7 +365,8 @@ class Agent:
                     link_element = result.select_one("a")
 
                     if title_element is not None and link_element is not None:
-                        link = link_element["href"].replace('/url?q=', '')
+                        # Decode the URL to replace %2B with +
+                        link = unquote(link_element["href"].replace('/url?q=', ''))
                         if link not in seen_links:  # Check if the link is already seen
                             seen_links.add(link)  # Mark this link as seen
                             results.append({
@@ -553,6 +548,7 @@ class Agent:
             self.global_history = []
             self.clear_global_history = False
         previous_actions = task_context['previous_actions'] + self.global_history
+        self.global_history.append(task_context['previous_actions'])
         conclusions = task_context['conclusions']
         performed_actions = task_context['performed_actions']
         max_steps = 20
@@ -602,7 +598,7 @@ class Agent:
                     print(f"{colorama.Fore.CYAN}\n🔍 Searching web for: {search_query}")
                     emit('receive_message', {'status': 'info', 'message': f"🔍 Searching web for: {search_query}"})
                     search_result = self.search_web(search_query)
-                    if json.dumps(search_result) in previous_actions:
+                    if json.dumps(search_result) in json.dumps(previous_actions):
                         print(f"{colorama.Fore.RED}\n🔍 Search results already provided: {search_query}")
                         emit('receive_message',
                              {'status': 'info', 'message': f"🔍 Search results already provided: {search_query}"})
@@ -640,7 +636,7 @@ class Agent:
                         print(f"{colorama.Fore.CYAN}\n🕷️ Scraping website: {url}")
                         emit('receive_message', {'status': 'info', 'message': f"🕷️ Scraping website: {url}"})
                         result = scrape_website(url)
-                        if json.dumps(result) in previous_actions:
+                        if json.dumps(result) in json.dumps(previous_actions):
                             print(f"{colorama.Fore.RED}🕷️ Scraping results already provided: {url}")
                             emit('receive_message',
                                  {'status': 'info', 'message': f"🕷️ Scraping results already provided: {url}"})
@@ -673,14 +669,18 @@ class Agent:
                     print(f"{colorama.Fore.CYAN}💻 Result: {result}")
                     emit('receive_message', {'status': 'info', 'message': f"💻 Result: {result}"})
 
+                time.sleep(5)
+
             self.tasks[task] = {'previous_actions': previous_actions, 'conclusions': conclusions,
                                 'performed_actions': performed_actions}
+            self.global_history.extend(previous_actions)
 
             if self.evaluate_completion(task, previous_actions):
                 print("🎉 Task completed successfully!\nWorking on creating a conclusion...🧠🧠🧠")
                 emit('receive_message', {'status': 'info', 'message': "🎉 Task completed successfully!"})
                 emit('receive_message', {'status': 'info', 'message': "Working on creating a conclusion...🧠🧠🧠"})
                 break
+
 
         if not conclusions:
             conclusion = self.get_conclusion(task, previous_actions)
