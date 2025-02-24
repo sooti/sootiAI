@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+from duckduckgo_search import DDGS
 import sys
 import time
 from typing import Any, Dict, Set, Generator
@@ -16,13 +17,6 @@ import yt_dlp
 from bs4 import BeautifulSoup
 from flask_socketio import emit
 from openai import OpenAI
-from selenium import webdriver
-from selenium.webdriver import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium_stealth import stealth
 from tqdm import tqdm
 from dotenv import load_dotenv
 import os
@@ -194,20 +188,20 @@ class Agent:
 
         action_definitions = """
         You are an AI with tools and actions.
-        HE FORMAT FOR ACTIONS IS {ACTION} ARGUMENTS
+        HE FORMAT FOR ACTIONS IS {ACTION} [ARGUMENTS]
         The following are the actions that fit the above format:
-        1. {SEARCH} QUERY - Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
+        1. {SEARCH} [QUERY] - Conduct a web search with a clear, focused query. Example: {SEARCH} weather in New York.
         You must Scrape between 2-6 results depending on task complexity.
-        2. {SCRAPE} URL - 
+        2. {SCRAPE} [URL] - 
         Only use {SCRAPE} if one or more of the following conditions are met: 
             a) You have the URL from search results
             b) You have the URL from a website you scraped
             c) The user included the URL in the task description. 
             In each case or cases you can only use the {SCRAPE} action on the URL provided.
-        3. {DOWNLOAD} URL - Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
-        4. {EXECUTE_PYTHON} CODE -  Run Python code. Example: {EXECUTE_PYTHON} print(42).
-        5. {EXECUTE_BASH} CODE - Run a Bash command. Example: {EXECUTE_BASH} ls -l.
-        6. {CONCLUDE} CONCLUSION - Provide a detailed summary once all tasks are completed. This should be used **only after all 
+        3. {DOWNLOAD} [URL] - Download a file from a URL. Example: {DOWNLOAD} https://example.com/file.pdf.
+        4. {EXECUTE_PYTHON} [CODE] -  Run Python code. Example: {EXECUTE_PYTHON} print(42).
+        5. {EXECUTE_BASH} [CODE] - Run a Bash command. Example: {EXECUTE_BASH} ls -l.
+        6. {CONCLUDE} [CONCLUSION] - Provide a detailed summary once all tasks are completed. This should be used **only after all 
         actions have been executed** and the task is ready to conclude, 
         For research or scientific tasks, structure your conclusion as follows:
             {CONCLUDE}
@@ -221,7 +215,23 @@ class Agent:
             - References – List citations used.
         For all other cases just provide the summary like this: {CONCLUDE}: followed by the summary of the task.
 
-        NEVER DO MORE THEN ONE ACTION IN A RESPONSE, NEVER DESCRIBE WHAT YOU ARE DOING, DO NOT BE CHATTY, JUST DO
+        - NEVER DO MORE THEN ONE ACTION IN A RESPONSE 
+        - NEVER DESCRIBE WHAT YOU ARE DOING.
+        - DO NOT BE CHATTY! JUST DO.
+        - DO NOT GIVE INTROS OR OUTROS, JUST ONE SINGLE ACTION.
+        - YOU ALWAYS PERFORM ONE SINGLE ACTION, NOT MULTIPLE -  For example do not do the following:
+        {SEARCH} "Weather in nyc today"
+        
+        {SCRAPE} https://weather.com/nyc
+        
+        {SCRAPE} https://weather.com/new_york
+        
+        {CONCLUDE} The weather in NYC is 70 degrees.
+        - NEVER REPEAT A PREVIOUS ACTION - For example do not do the following:
+        {SCRAPE} https://weather.com/nyc
+        User: {WEBSITE CONTENTS OF SCRAPED WEBSITE}
+        {SCRAPE} https://weather.com/nyc
+
         """
 
         return f"""
@@ -341,42 +351,7 @@ class Agent:
                 return
 
     def search_web(self, query):
-        results = []
-        seen_links = set()  # Track unique links to avoid duplicates
-
-        # Base Google Search URL
-        base_url = "https://www.google.com/search"
-        params = {"q": query, "hl": "en"}  # Parameters for Google search query
-
-        for page in range(2):  # Iterate through the first five pages
-            params["start"] = page * 10  # Pagination parameter
-            response = requests.get(base_url, params=params)
-            if response.status_code != 200:
-                print(f"Failed to fetch search results: {response.status_code}")
-                break
-
-            # Parse HTML content
-            soup = BeautifulSoup(response.text, "html.parser")
-            search_results = soup.select("div")
-
-            for result in search_results:
-                try:
-                    title_element = result.select_one("h3")
-                    link_element = result.select_one("a")
-
-                    if title_element is not None and link_element is not None:
-                        # Decode the URL to replace %2B with +
-                        link = unquote(link_element["href"].replace('/url?q=', ''))
-                        if link not in seen_links:  # Check if the link is already seen
-                            seen_links.add(link)  # Mark this link as seen
-                            results.append({
-                                "title": title_element.get_text(strip=True),
-                                "link": link,
-                            })
-                except Exception as e:
-                    print(f"Error parsing result: {e}")
-                    continue
-
+        results = DDGS().text(query, max_results=10)
         return results
 
     def _scrape_python_files(self, path):
